@@ -156,6 +156,7 @@ Traefik Proxy supports the following log formats:
 - `common` - Traefik's extended CLF format (default)
 - `genericCLF` - Generic CLF format compatible with standard log analyzers
 - `json` - JSON format for structured logging
+- `custom` - Line format defined by a template of [JSON fields](../reference/install-configuration/observability/logs-and-accesslogs.md#custom-format)
 
 ## Origin vs. Downstream Status
 
@@ -174,7 +175,7 @@ When `OriginStatus` is empty (logged as `0`), the request was never proxied to a
 
 !!! info
 
-    Both fields are only available with the `json` format. 
+    Both fields are only available with the `json` and `custom` formats.
     The `common` and `genericCLF` formats, and the `statusCodes` filter, use the `DownstreamStatus` value.
 
 ## Access Log Filters

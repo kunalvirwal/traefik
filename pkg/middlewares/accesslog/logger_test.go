@@ -544,6 +544,69 @@ func TestLoggerGenericCLFDropQueryParameters(t *testing.T) {
 	assertValidGenericCLFLogData(t, expectedLog, logData)
 }
 
+func TestLoggerCustom(t *testing.T) {
+	testCases := []struct {
+		desc        string
+		fields      *otypes.AccessLogFields
+		expectedLog string
+	}{
+		{
+			desc: "all fields kept",
+			expectedLog: `TestHost - TestUser "POST testpath?param1=test1&param2=test2 HTTP/0.0" 123 12 "testReferer" "testUserAgent" testRouter http://127.0.0.1/testService TestHost
+`,
+		},
+		{
+			desc: "dropped and redacted fields",
+			fields: &otypes.AccessLogFields{
+				DefaultMode: otypes.AccessLogKeep,
+				Names: map[string]string{
+					"routername": otypes.AccessLogDrop,
+				},
+				Headers: &otypes.FieldHeaders{
+					DefaultMode: otypes.AccessLogDrop,
+					Names: map[string]string{
+						"user-agent": otypes.AccessLogRedact,
+					},
+				},
+				QueryParameters: &otypes.FieldQueryParameters{
+					DefaultMode: otypes.AccessLogDrop,
+				},
+			},
+			expectedLog: `TestHost - TestUser "POST testpath HTTP/0.0" 123 12 "-" "REDACTED" - http://127.0.0.1/testService TestHost
+`,
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			logFilePath := filepath.Join(t.TempDir(), logFileNameSuffix)
+			config := &otypes.AccessLog{
+				FilePath: logFilePath,
+				Format:   CustomFormat,
+				Template: `{ClientHost} - {ClientUsername} "{RequestMethod} {RequestPath} {RequestProtocol}" {DownstreamStatus} {DownstreamContentSize} "{request_Referer}" "{request_user-agent}" {RouterName} {ServiceURL} {RequestHost}`,
+				Fields:   test.fields,
+			}
+			doLogging(t, config, false, false)
+
+			logData, err := os.ReadFile(logFilePath)
+			require.NoError(t, err)
+
+			assert.Equal(t, test.expectedLog, string(logData))
+		})
+	}
+}
+
+func TestNewHandler_invalidTemplate(t *testing.T) {
+	logFilePath := filepath.Join(t.TempDir(), logFileNameSuffix)
+	config := &otypes.AccessLog{FilePath: logFilePath, Format: CustomFormat, Template: "{Unknown}"}
+
+	handler, err := NewHandler(t.Context(), config)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, handler.Close()) })
+
+	assert.IsType(t, &CommonLogFormatter{}, handler.logger.Formatter)
+}
+
 func assertString(exp string) func(t *testing.T, actual any) {
 	return func(t *testing.T, actual any) {
 		t.Helper()

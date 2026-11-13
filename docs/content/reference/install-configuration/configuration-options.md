@@ -20,7 +20,7 @@ THIS FILE MUST NOT BE EDITED BY HAND
 | <a id="opt-accesslog-filters-minduration" href="#opt-accesslog-filters-minduration" title="#opt-accesslog-filters-minduration">accesslog.filters.minduration</a> | Keep access logs when request took longer than the specified duration. | 0 |
 | <a id="opt-accesslog-filters-retryattempts" href="#opt-accesslog-filters-retryattempts" title="#opt-accesslog-filters-retryattempts">accesslog.filters.retryattempts</a> | Keep access logs when at least one retry happened. | false |
 | <a id="opt-accesslog-filters-statuscodes" href="#opt-accesslog-filters-statuscodes" title="#opt-accesslog-filters-statuscodes">accesslog.filters.statuscodes</a> | Keep access logs with status codes in the specified range. | |
-| <a id="opt-accesslog-format" href="#opt-accesslog-format" title="#opt-accesslog-format">accesslog.format</a> | Access log format: json, common, or genericCLF | common |
+| <a id="opt-accesslog-format" href="#opt-accesslog-format" title="#opt-accesslog-format">accesslog.format</a> | Access log format: json, common, genericCLF, or custom | common |
 | <a id="opt-accesslog-otlp" href="#opt-accesslog-otlp" title="#opt-accesslog-otlp">accesslog.otlp</a> | Settings for OpenTelemetry. | false |
 | <a id="opt-accesslog-otlp-grpc" href="#opt-accesslog-otlp-grpc" title="#opt-accesslog-otlp-grpc">accesslog.otlp.grpc</a> | gRPC configuration for the OpenTelemetry collector. | false |
 | <a id="opt-accesslog-otlp-grpc-endpoint" href="#opt-accesslog-otlp-grpc-endpoint" title="#opt-accesslog-otlp-grpc-endpoint">accesslog.otlp.grpc.endpoint</a> | Sets the gRPC endpoint (host:port) of the collector. | localhost:4317 |
@@ -39,6 +39,7 @@ THIS FILE MUST NOT BE EDITED BY HAND
 | <a id="opt-accesslog-otlp-http-tls-key" href="#opt-accesslog-otlp-http-tls-key" title="#opt-accesslog-otlp-http-tls-key">accesslog.otlp.http.tls.key</a> | TLS key | |
 | <a id="opt-accesslog-otlp-resourceattributes-name" href="#opt-accesslog-otlp-resourceattributes-name" title="#opt-accesslog-otlp-resourceattributes-name">accesslog.otlp.resourceattributes._name_</a> | Defines additional resource attributes (key:value). | |
 | <a id="opt-accesslog-otlp-servicename" href="#opt-accesslog-otlp-servicename" title="#opt-accesslog-otlp-servicename">accesslog.otlp.servicename</a> | Defines the service name resource attribute. | traefik |
+| <a id="opt-accesslog-template" href="#opt-accesslog-template" title="#opt-accesslog-template">accesslog.template</a> | Access log line template, used with the custom format. Each {FieldName} placeholder is replaced by the value of the field with that name in the json format. | |
 | <a id="opt-api" href="#opt-api" title="#opt-api">api</a> | Enable api/dashboard. | false |
 | <a id="opt-api-basepath" href="#opt-api-basepath" title="#opt-api-basepath">api.basepath</a> | Defines the base path where the API and Dashboard will be exposed. | / |
 | <a id="opt-api-dashboard" href="#opt-api-dashboard" title="#opt-api-dashboard">api.dashboard</a> | Activate dashboard. | true |

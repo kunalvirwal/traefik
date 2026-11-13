@@ -225,7 +225,8 @@ The section below describes how to configure Traefik access logs using the stati
 |:-----------|:--------------------------|:--------|:---------|
 | <a id="opt-accesslog-filePath" href="#opt-accesslog-filePath" title="#opt-accesslog-filePath">`accesslog.filePath`</a> | By default, the access logs are written to the standard output.<br />You can configure a file path instead using the `filePath` option.|  | No      |
 | <a id="opt-accesslog-dualOutput" href="#opt-accesslog-dualOutput" title="#opt-accesslog-dualOutput">`accesslog.dualOutput`</a> | Force Stdio logging, even if OTLP is configured. By default, Stdio logging is disabled when OTLP is enabled for performance reasons. | false      | No      |
-| <a id="opt-accesslog-format" href="#opt-accesslog-format" title="#opt-accesslog-format">`accesslog.format`</a> | By default, logs are written using the Traefik Common Log Format (CLF).<br />Available formats: [`common`](#traefik-clf-format-fields) (Traefik extended CLF), [`genericCLF`](#generic-clf-format-fields) (standard CLF compatible with analyzers), or [`json`](#json-format-fields).<br />If the given format is unsupported, the default (`common`) is used instead. | "common" | No      |
+| <a id="opt-accesslog-format" href="#opt-accesslog-format" title="#opt-accesslog-format">`accesslog.format`</a> | By default, logs are written using the Traefik Common Log Format (CLF).<br />Available formats: [`common`](#traefik-clf-format-fields) (Traefik extended CLF), [`genericCLF`](#generic-clf-format-fields) (standard CLF compatible with analyzers), [`json`](#json-format-fields), or [`custom`](#custom-format) (line defined by [`template`](#opt-accesslog-template)).<br />If the given format is unsupported, the default (`common`) is used instead. | "common" | No      |
+| <a id="opt-accesslog-template" href="#opt-accesslog-template" title="#opt-accesslog-template">`accesslog.template`</a> | Template of the log lines written with the `custom` format.<br />Each `{FieldName}` placeholder is replaced by the value of the field with that name in the `json` format.<br />More information in the [custom format](#custom-format) section. |  | Yes, with the `custom` format |
 | <a id="opt-accesslog-bufferingSize" href="#opt-accesslog-bufferingSize" title="#opt-accesslog-bufferingSize">`accesslog.bufferingSize`</a> | To process access logs asynchronously, set `bufferingSize` to a value greater than zero.<br />The value specifies the capacity, in log lines, of the in-memory queue.<br />Traefik writes queued log lines continuously and does not wait for the queue to become full.<br />A larger queue reduces the chance that access logging blocks requests under load. | 0 | No      |
 | <a id="opt-accesslog-addInternals" href="#opt-accesslog-addInternals" title="#opt-accesslog-addInternals">`accesslog.addInternals`</a> | Enables access logs for internal resources (e.g.: `ping@internal`). | false  | No      |
 | <a id="opt-accesslog-filters-statusCodes" href="#opt-accesslog-filters-statusCodes" title="#opt-accesslog-filters-statusCodes">`accesslog.filters.statusCodes`</a> | Limit the access logs to requests with a status codes in the specified range. | [ ]      | No      |
@@ -358,6 +359,72 @@ Below the fields displayed with the generic CLF format:
 "<request_method> <request_path> <request_protocol>" <HTTP_status> <content-length> 
 "<request_referrer>" "<request_user_agent>"
 ```
+
+### Custom format
+
+The `custom` format writes each log line from the [`template`](#opt-accesslog-template) option.
+Each `{FieldName}` placeholder is replaced by the value of the field with that name in the `json` format:
+
+- [JSON format fields](#json-format-fields), such as `{RequestHost}` or `{DownstreamStatus}`.
+- Headers, with the `request_`, `origin_`, and `downstream_` prefixes, such as `{request_User-Agent}`.
+  Header names are case-insensitive, the other field names are case-sensitive.
+
+```yaml tab="File (YAML)"
+accessLog:
+  format: custom
+  template: '{RequestHost} {ClientHost} - {ClientUsername} [{StartUTC:clf}] "{RequestMethod} {RequestPath} {RequestProtocol}" {DownstreamStatus} {DownstreamContentSize} "{request_Referer}" "{request_User-Agent}" {Duration:ms}ms'
+  fields:
+    headers:
+      names:
+        Referer: keep
+        User-Agent: keep
+```
+
+```toml tab="File (TOML)"
+[accessLog]
+  format = "custom"
+  template = '{RequestHost} {ClientHost} - {ClientUsername} [{StartUTC:clf}] "{RequestMethod} {RequestPath} {RequestProtocol}" {DownstreamStatus} {DownstreamContentSize} "{request_Referer}" "{request_User-Agent}" {Duration:ms}ms'
+
+  [accessLog.fields.headers.names]
+    Referer = "keep"
+    User-Agent = "keep"
+```
+
+```sh tab="CLI"
+--accesslog.format=custom
+--accesslog.template='{RequestHost} {ClientHost} - {ClientUsername} [{StartUTC:clf}] "{RequestMethod} {RequestPath} {RequestProtocol}" {DownstreamStatus} {DownstreamContentSize} "{request_Referer}" "{request_User-Agent}" {Duration:ms}ms'
+--accesslog.fields.headers.names.Referer=keep
+--accesslog.fields.headers.names.User-Agent=keep
+```
+
+The example above produces log lines such as:
+
+```text
+example.com 203.0.113.7 - - [06/Nov/2026:10:15:30 +0000] "GET /v1/users HTTP/2.0" 200 512 "-" "curl/8.7.1" 12ms
+```
+
+Values are written as in the `json` format, without the quotes around strings:
+
+- Times use the RFC 3339 format, and durations are in nanoseconds.
+- Quotes, backslashes, and control characters are escaped with a backslash (`\"`, `\\`, `\n`, `\u001b`, ...), so a value cannot break the quotes of the template.
+- A field without a value is written as `-`.
+
+A modifier, written as `{FieldName:modifier}`, changes how a value is written:
+
+| Modifier | Fields                                     | Output                                                    |
+|:---------|:-------------------------------------------|:----------------------------------------------------------|
+| <a id="opt-clf" href="#opt-clf" title="#opt-clf">`clf`</a> | `StartUTC`, `StartLocal`                   | Time in the Common Log Format, e.g. `06/Nov/2026:10:15:30 +0000` |
+| <a id="opt-ms" href="#opt-ms" title="#opt-ms">`ms`</a> | `Duration`, `OriginDuration`, `Overhead`   | Duration in milliseconds, e.g. `12`                       |
+
+To write a literal `{`, `}`, or `\`, escape it with a backslash: `\{`, `\}`, or `\\`.
+A backslash before any other character is written as is.
+
+The [`fields`](#opt-accesslog-fields-defaultMode) options apply to the `custom` format as to the `json` format:
+a dropped field is written as `-`, and a redacted header as `REDACTED`.
+Headers are dropped by default, so a header placeholder requires the header to be kept or redacted.
+Traefik logs a warning at startup for each placeholder whose field is dropped.
+
+When the template is empty, contains an unknown field or modifier, or contains an unescaped `{` or `}` that is not part of a placeholder, Traefik logs the reason at startup and writes the access logs in the `common` format instead.
 
 ### JSON format fields
 

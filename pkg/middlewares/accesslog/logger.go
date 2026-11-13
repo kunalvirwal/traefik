@@ -43,6 +43,9 @@ const (
 
 	// JSONFormat is the JSON logging format.
 	JSONFormat string = "json"
+
+	// CustomFormat is the logging format defined by a user template.
+	CustomFormat string = "custom"
 )
 
 type noopCloser struct {
@@ -76,6 +79,8 @@ type Handler struct {
 
 // NewHandler creates a new Handler.
 func NewHandler(ctx context.Context, config *otypes.AccessLog, hooks ...logrus.Hook) (*Handler, error) {
+	formatter := newFormatter(ctx, config)
+
 	var file io.WriteCloser = noopCloser{os.Stdout}
 	if len(config.FilePath) > 0 {
 		f, err := openAccessLogFile(config.FilePath)
@@ -85,20 +90,6 @@ func NewHandler(ctx context.Context, config *otypes.AccessLog, hooks ...logrus.H
 		file = f
 	}
 	logHandlerChan := make(chan handlerParams, config.BufferingSize)
-
-	var formatter logrus.Formatter
-
-	switch config.Format {
-	case CommonFormat:
-		formatter = new(CommonLogFormatter)
-	case GenericCLFFormat:
-		formatter = new(GenericCLFLogFormatter)
-	case JSONFormat:
-		formatter = new(logrus.JSONFormatter)
-	default:
-		log.Error().Msgf("Unsupported access log format: %q, defaulting to common format instead.", config.Format)
-		formatter = new(CommonLogFormatter)
-	}
 
 	logger := &logrus.Logger{
 		Out:       file,
@@ -147,6 +138,10 @@ func NewHandler(ctx context.Context, config *otypes.AccessLog, hooks ...logrus.H
 		}
 	}
 
+	if customFormatter, ok := formatter.(*CustomLogFormatter); ok {
+		warnDroppedTemplateFields(ctx, config.Fields, customFormatter.fields())
+	}
+
 	logHandler := &Handler{
 		config:         config,
 		logger:         logger,
@@ -171,6 +166,51 @@ func NewHandler(ctx context.Context, config *otypes.AccessLog, hooks ...logrus.H
 	}
 
 	return logHandler, nil
+}
+
+func newFormatter(ctx context.Context, config *otypes.AccessLog) logrus.Formatter {
+	if config.Template != "" && config.Format != CustomFormat {
+		log.Ctx(ctx).Warn().Msgf("Access log template is ignored with the %q format, it is only used with the %q format.", config.Format, CustomFormat)
+	}
+
+	switch config.Format {
+	case CommonFormat:
+		return new(CommonLogFormatter)
+	case GenericCLFFormat:
+		return new(GenericCLFLogFormatter)
+	case JSONFormat:
+		return new(logrus.JSONFormatter)
+	case CustomFormat:
+		formatter, err := NewCustomLogFormatter(config.Template)
+		if err != nil {
+			// Like an unsupported format, an invalid template falls back to the common format,
+			// so that a configuration mistake does not silently disable the access logs.
+			log.Ctx(ctx).Error().Err(err).Msg("Invalid access log template, defaulting to common format instead.")
+			return new(CommonLogFormatter)
+		}
+
+		return formatter
+	default:
+		log.Error().Msgf("Unsupported access log format: %q, defaulting to common format instead.", config.Format)
+		return new(CommonLogFormatter)
+	}
+}
+
+// warnDroppedTemplateFields warns about template fields that the fields configuration removes from every log entry,
+// as they would always be rendered with the default value.
+func warnDroppedTemplateFields(ctx context.Context, fieldsConfig *otypes.AccessLogFields, templateFields []string) {
+	for _, field := range templateFields {
+		var dropped bool
+		if _, header, found := cutHeaderPrefix(field); found {
+			dropped = fieldsConfig.KeepHeader(header) == otypes.AccessLogDrop
+		} else {
+			dropped = !fieldsConfig.Keep(strings.ToLower(field))
+		}
+
+		if dropped {
+			log.Ctx(ctx).Warn().Msgf("Access log template field %q is dropped by the fields configuration and is always logged as %q.", field, defaultValue)
+		}
+	}
 }
 
 // AliceConstructor returns an alice.Constructor that wraps the Handler (conditionally) in a middleware chain.
@@ -395,9 +435,9 @@ func (h *Handler) logTheRoundTrip(ctx context.Context, logDataTable *LogData) {
 		}
 	}
 
-	h.redactHeaders(logDataTable.Request.headers, fields, "request_")
-	h.redactHeaders(logDataTable.OriginResponse, fields, "origin_")
-	h.redactHeaders(logDataTable.DownstreamResponse.headers, fields, "downstream_")
+	h.redactHeaders(logDataTable.Request.headers, fields, RequestHeaderPrefix)
+	h.redactHeaders(logDataTable.OriginResponse, fields, OriginHeaderPrefix)
+	h.redactHeaders(logDataTable.DownstreamResponse.headers, fields, DownstreamHeaderPrefix)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()

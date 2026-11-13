@@ -2,6 +2,8 @@ package accesslog
 
 import (
 	"net/http"
+
+	"github.com/traefik/traefik/v3/pkg/observability/logs"
 )
 
 const (
@@ -88,6 +90,13 @@ const (
 	// OTelSpanID is the OTel-conformant log attribute for the span identifier.
 	OTelSpanID = "span_id"
 
+	// RequestHeaderPrefix is the map key prefix used for the headers of the request sent by the client.
+	RequestHeaderPrefix = "request_"
+	// OriginHeaderPrefix is the map key prefix used for the headers of the response returned by the origin server.
+	OriginHeaderPrefix = "origin_"
+	// DownstreamHeaderPrefix is the map key prefix used for the headers of the response returned to the client.
+	DownstreamHeaderPrefix = "downstream_"
+
 	// Kubernetes Ingress fields.
 
 	// KubernetesIngressNamespace is the namespace of the Kubernetes Ingress resource the router handles.
@@ -117,6 +126,8 @@ const (
 )
 
 // These are written out in the default case when no config is provided to specify keys of interest.
+// Every new core field must be added either here or to nonDefaultCoreKeys,
+// as the custom format rejects template placeholders for fields missing from allCoreKeys.
 var defaultCoreKeys = [...]string{
 	StartUTC,
 	Duration,
@@ -151,11 +162,31 @@ var defaultCoreKeys = [...]string{
 	RequestCount,
 }
 
+// These are only written out when the request carries the matching context (entry point, tracing, Kubernetes metadata).
+var nonDefaultCoreKeys = [...]string{
+	logs.EntryPointName,
+	TraceID,
+	SpanID,
+	OTelTraceID,
+	OTelSpanID,
+	KubernetesIngressNamespace,
+	KubernetesIngressName,
+	KubernetesIngressRouteNamespace,
+	KubernetesIngressRouteName,
+	KubernetesServiceNamespace,
+	KubernetesServiceName,
+	KubernetesServicePort,
+}
+
 // This contains the set of all keys, i.e. all the default keys plus all non-default keys.
 var allCoreKeys = make(map[string]struct{})
 
 func init() {
 	for _, k := range defaultCoreKeys {
+		allCoreKeys[k] = struct{}{}
+	}
+
+	for _, k := range nonDefaultCoreKeys {
 		allCoreKeys[k] = struct{}{}
 	}
 }

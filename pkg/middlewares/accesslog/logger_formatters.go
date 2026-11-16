@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -119,8 +120,15 @@ type templateSegment struct {
 // A backslash escapes a brace or another backslash, so that they are written as is.
 // The template is parsed once, so that invalid placeholders are reported at startup instead of on every log line.
 func NewCustomLogFormatter(template string) (*CustomLogFormatter, error) {
+	// YAML block scalars and TOML multi-line strings end with a line break, which would add an empty line after every entry.
+	template = strings.TrimRight(template, "\r\n")
 	if template == "" {
 		return nil, errors.New("template is empty")
+	}
+
+	// Each entry must stay on one line, as log collectors read one entry per line.
+	if i := strings.IndexAny(template, "\r\n"); i >= 0 {
+		return nil, fmt.Errorf("unexpected line break at position %d", i)
 	}
 
 	var segments []templateSegment
@@ -169,14 +177,34 @@ func NewCustomLogFormatter(template string) (*CustomLogFormatter, error) {
 	return &CustomLogFormatter{segments: segments}, nil
 }
 
+// valueEncoder encodes a single field value into its own buffer.
+type valueEncoder struct {
+	buf     bytes.Buffer
+	encoder *json.Encoder
+}
+
+// valueEncoders is a pool rather than a CustomLogFormatter field, because logrus does not serialize Format calls.
+var valueEncoders = sync.Pool{
+	New: func() any {
+		v := &valueEncoder{}
+		v.encoder = json.NewEncoder(&v.buf)
+		// Unlike the json format, HTML characters are not escaped, as they are common in URLs and not special in a log line.
+		v.encoder.SetEscapeHTML(false)
+
+		return v
+	},
+}
+
 // Format formats the log entry with the template.
 func (f *CustomLogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-	b := &bytes.Buffer{}
+	// logrus provides a pooled buffer when logging, but not when Format is called directly, as for the OTLP log body.
+	b := entry.Buffer
+	if b == nil {
+		b = &bytes.Buffer{}
+	}
 
-	value := &bytes.Buffer{}
-	encoder := json.NewEncoder(value)
-	// Unlike the json format, HTML characters are not escaped, as they are common in URLs and not special in a log line.
-	encoder.SetEscapeHTML(false)
+	value := valueEncoders.Get().(*valueEncoder)
+	defer valueEncoders.Put(value)
 
 	for _, segment := range f.segments {
 		if segment.field == "" {
@@ -188,7 +216,7 @@ func (f *CustomLogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 			continue
 		}
 
-		if err := writeTemplateValue(b, value, encoder, entry.Data[segment.field]); err != nil {
+		if err := writeTemplateValue(b, value, entry.Data[segment.field]); err != nil {
 			return nil, fmt.Errorf("formatting field %s: %w", segment.field, err)
 		}
 	}
@@ -283,18 +311,18 @@ func cutHeaderPrefix(field string) (prefix, header string, found bool) {
 
 // writeTemplateValue writes the value as encoded by the json format, so that both formats log the same values,
 // and the json escaping keeps quotes and control characters from breaking the line.
-func writeTemplateValue(b, scratch *bytes.Buffer, encoder *json.Encoder, value any) error {
+func writeTemplateValue(b *bytes.Buffer, encoder *valueEncoder, value any) error {
 	// Errors are logged with their message, like logrus.JSONFormatter does.
 	if err, ok := value.(error); ok {
 		value = err.Error()
 	}
 
-	scratch.Reset()
-	if err := encoder.Encode(value); err != nil {
+	encoder.buf.Reset()
+	if err := encoder.encoder.Encode(value); err != nil {
 		return err
 	}
 
-	raw := bytes.TrimSuffix(scratch.Bytes(), []byte("\n"))
+	raw := bytes.TrimSuffix(encoder.buf.Bytes(), []byte("\n"))
 	if string(raw) == "null" {
 		b.WriteString(defaultValue)
 		return nil

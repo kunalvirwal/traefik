@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/containous/alice"
+	"github.com/rs/zerolog"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -605,6 +606,93 @@ func TestNewHandler_invalidTemplate(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, handler.Close()) })
 
 	assert.IsType(t, &CommonLogFormatter{}, handler.logger.Formatter)
+}
+
+func TestNewHandler_warnDroppedTemplateFields(t *testing.T) {
+	defaultFields := func() *otypes.AccessLogFields {
+		fields := &otypes.AccessLogFields{}
+		fields.SetDefaults()
+		return fields
+	}
+
+	testCases := []struct {
+		desc             string
+		fields           *otypes.AccessLogFields
+		expectedWarnings []string
+	}{
+		{
+			desc:   "headers are dropped by default",
+			fields: defaultFields(),
+			expectedWarnings: []string{
+				`Access log template field "request_User-Agent" is dropped by the fields configuration and is always logged as "-".`,
+			},
+		},
+		{
+			desc: "dropped field and redacted header",
+			fields: &otypes.AccessLogFields{
+				DefaultMode: otypes.AccessLogKeep,
+				Names:       map[string]string{"ClientHost": otypes.AccessLogDrop},
+				Headers: &otypes.FieldHeaders{
+					DefaultMode: otypes.AccessLogDrop,
+					Names:       map[string]string{"user-agent": otypes.AccessLogRedact},
+				},
+			},
+			expectedWarnings: []string{
+				`Access log template field "ClientHost" is dropped by the fields configuration and is always logged as "-".`,
+			},
+		},
+		{
+			desc: "fields dropped by default mode",
+			fields: &otypes.AccessLogFields{
+				DefaultMode: otypes.AccessLogDrop,
+				Names:       map[string]string{"RequestHost": otypes.AccessLogKeep},
+				Headers: &otypes.FieldHeaders{
+					DefaultMode: otypes.AccessLogKeep,
+				},
+			},
+			expectedWarnings: []string{
+				`Access log template field "ClientHost" is dropped by the fields configuration and is always logged as "-".`,
+			},
+		},
+		{
+			desc: "no fields configuration",
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			ctx := zerolog.New(&out).WithContext(t.Context())
+
+			config := &otypes.AccessLog{
+				FilePath: filepath.Join(t.TempDir(), logFileNameSuffix),
+				Format:   CustomFormat,
+				Template: `{ClientHost} {RequestHost} "{request_user-agent}"`,
+				Fields:   test.fields,
+			}
+
+			handler, err := NewHandler(ctx, config)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, handler.Close()) })
+
+			var warnings []string
+			for line := range strings.Lines(out.String()) {
+				var entry struct {
+					Level   string
+					Message string
+				}
+				require.NoError(t, json.Unmarshal([]byte(line), &entry))
+
+				if entry.Level == zerolog.LevelWarnValue {
+					warnings = append(warnings, entry.Message)
+				}
+			}
+
+			assert.Equal(t, test.expectedWarnings, warnings)
+		})
+	}
 }
 
 func assertString(exp string) func(t *testing.T, actual any) {

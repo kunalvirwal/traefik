@@ -2,6 +2,7 @@ package accesslog
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -372,6 +373,15 @@ func TestCustomLogFormatter_Format(t *testing.T) {
 `,
 		},
 		{
+			desc:     "trailing line breaks are removed",
+			template: "{RequestHost}\r\n\n",
+			data: map[string]any{
+				RequestHost: "example.com",
+			},
+			expectedLog: `example.com
+`,
+		},
+		{
 			desc:     "clf time and ms duration modifiers",
 			template: `[{StartUTC:clf}] [{StartLocal:clf}] {Duration:ms}ms {OriginDuration:ms}ms {Overhead:ms}ms`,
 			data: map[string]any{
@@ -433,6 +443,21 @@ func TestNewCustomLogFormatter_invalidTemplate(t *testing.T) {
 			desc:          "empty template",
 			template:      "",
 			expectedError: "template is empty",
+		},
+		{
+			desc:          "template with only line breaks",
+			template:      "\n",
+			expectedError: "template is empty",
+		},
+		{
+			desc:          "line feed inside the template",
+			template:      "{RequestHost}\n{ClientHost}",
+			expectedError: "unexpected line break at position 13",
+		},
+		{
+			desc:          "carriage return inside the template",
+			template:      "{RequestHost}\r{ClientHost}\n",
+			expectedError: "unexpected line break at position 13",
 		},
 		{
 			desc:          "unknown field",
@@ -507,6 +532,52 @@ func TestNewCustomLogFormatter_invalidTemplate(t *testing.T) {
 
 			_, err := NewCustomLogFormatter(test.template)
 			assert.EqualError(t, err, test.expectedError)
+		})
+	}
+}
+
+func BenchmarkFormatters(b *testing.B) {
+	customFormatter, err := NewCustomLogFormatter(`{ClientHost} - {ClientUsername} [{StartUTC:clf}] "{RequestMethod} {RequestPath} {RequestProtocol}" {DownstreamStatus} {DownstreamContentSize} "{request_Referer}" "{request_User-Agent}" {RequestCount} "{RouterName}" "{ServiceURL}" {Duration:ms}ms`)
+	require.NoError(b, err)
+
+	formatters := map[string]logrus.Formatter{
+		"common": &CommonLogFormatter{},
+		"json":   &logrus.JSONFormatter{},
+		"custom": customFormatter,
+	}
+
+	fields := logrus.Fields{
+		ClientHost:             "203.0.113.7",
+		ClientUsername:         "-",
+		StartUTC:               time.Date(2026, time.November, 6, 10, 15, 30, 0, time.UTC),
+		RequestMethod:          http.MethodGet,
+		RequestPath:            "/api/v1/users?page=2&sort=name",
+		RequestProtocol:        "HTTP/2.0",
+		DownstreamStatus:       http.StatusOK,
+		DownstreamContentSize:  int64(5120),
+		RequestRefererHeader:   "https://example.com/dashboard",
+		RequestUserAgentHeader: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+		RequestCount:           uint64(123456),
+		RouterName:             "api-router@kubernetescrd",
+		ServiceURL:             "http://10.42.0.17:8080",
+		Duration:               12 * time.Millisecond,
+	}
+
+	for name, formatter := range formatters {
+		b.Run(name, func(b *testing.B) {
+			// Logging through a logger, so that the formatter receives the pooled entry buffer as in production.
+			logger := &logrus.Logger{
+				Out:       io.Discard,
+				Formatter: formatter,
+				Hooks:     make(logrus.LevelHooks),
+				Level:     logrus.InfoLevel,
+			}
+			entry := logger.WithFields(fields)
+
+			b.ReportAllocs()
+			for b.Loop() {
+				entry.Println()
+			}
 		})
 	}
 }

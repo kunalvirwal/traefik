@@ -191,7 +191,7 @@ func newFormatter(ctx context.Context, config *otypes.AccessLog) logrus.Formatte
 
 		return formatter
 	default:
-		log.Error().Msgf("Unsupported access log format: %q, defaulting to common format instead.", config.Format)
+		log.Ctx(ctx).Error().Msgf("Unsupported access log format: %q, defaulting to common format instead.", config.Format)
 		return new(CommonLogFormatter)
 	}
 }

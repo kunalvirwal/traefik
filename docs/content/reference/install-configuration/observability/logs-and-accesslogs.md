@@ -367,7 +367,11 @@ Each `{FieldName}` placeholder is replaced by the value of the field with that n
 
 - [JSON format fields](#json-format-fields), such as `{RequestHost}` or `{DownstreamStatus}`.
 - Headers, with the `request_`, `origin_`, and `downstream_` prefixes, such as `{request_User-Agent}`.
-  Header names are case-insensitive, the other field names are case-sensitive.
+
+Field names are case-sensitive: `{RequestHost}` is valid, `{requesthost}` is not.
+Header names are case-insensitive: `{request_user-agent}` and `{request_User-Agent}` are the same placeholder.
+
+The keys that the `json` format adds to every line, such as `time`, `level`, and `msg`, are not fields and cannot be used as placeholders.
 
 ```yaml tab="File (YAML)"
 accessLog:
@@ -397,6 +401,8 @@ accessLog:
 --accesslog.fields.headers.names.User-Agent=keep
 ```
 
+In YAML, quote the template: an unquoted value that starts with `{` is read as a mapping, and the configuration fails to load.
+
 The example above produces log lines such as:
 
 ```text
@@ -407,6 +413,7 @@ Values are written as in the `json` format, without the quotes around strings:
 
 - Times use the RFC 3339 format, and durations are in nanoseconds.
 - Quotes, backslashes, and control characters are escaped with a backslash (`\"`, `\\`, `\n`, `\u001b`, ...), so a value cannot break the quotes of the template.
+  Unlike the `json` format, `<`, `>`, and `&` are written as is.
 - A field without a value is written as `-`.
 
 A modifier, written as `{FieldName:modifier}`, changes how a value is written:
@@ -424,7 +431,14 @@ a dropped field is written as `-`, and a redacted header as `REDACTED`.
 Headers are dropped by default, so a header placeholder requires the header to be kept or redacted.
 Traefik logs a warning at startup for each placeholder whose field is dropped.
 
-When the template is empty, contains an unknown field or modifier, or contains an unescaped `{` or `}` that is not part of a placeholder, Traefik logs the reason at startup and writes the access logs in the `common` format instead.
+When the template is invalid, Traefik logs the reason at startup and writes the access logs in the `common` format instead.
+A template is invalid when:
+
+- It is empty.
+- It contains a line break other than at its end, where line breaks are ignored.
+- A placeholder names an unknown field, an invalid header name, or an unknown modifier.
+- A modifier is used on a field it does not apply to, such as `{RequestHost:clf}`.
+- It contains an unescaped `{` or `}` that is not part of a placeholder.
 
 ### JSON format fields
 

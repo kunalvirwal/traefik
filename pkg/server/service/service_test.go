@@ -11,11 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
 	"github.com/traefik/traefik/v2/pkg/config/runtime"
 	"github.com/traefik/traefik/v2/pkg/healthcheck"
+	"github.com/traefik/traefik/v2/pkg/log"
 	"github.com/traefik/traefik/v2/pkg/server/provider"
 	"github.com/traefik/traefik/v2/pkg/testhelpers"
 )
@@ -602,6 +605,70 @@ func TestMultipleTypeOnBuildHTTP(t *testing.T) {
 
 	_, err := manager.BuildHTTP(t.Context(), "test@file")
 	assert.Error(t, err, "cannot create service: multi-types service not supported, consider declaring two different pieces of service instead")
+}
+
+func TestGetMirrorServiceHandler_maxBodySizeWarning(t *testing.T) {
+	testCases := []struct {
+		desc        string
+		maxBodySize *int64
+		wantWarning bool
+	}{
+		{
+			desc:        "default body size",
+			wantWarning: true,
+		},
+		{
+			desc:        "unlimited body size",
+			maxBodySize: new(int64(-1)),
+			wantWarning: true,
+		},
+		{
+			desc:        "limited body size",
+			maxBodySize: new(int64(1024)),
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			// The logger is global, so the subtests must not run in parallel.
+			logger, hook := logrustest.NewNullLogger()
+			log.SetLogger(logger)
+			t.Cleanup(func() { log.SetLogger(logrus.StandardLogger()) })
+
+			services := map[string]*runtime.ServiceInfo{
+				"main@file": {
+					Service: &dynamic.Service{
+						LoadBalancer: &dynamic.ServersLoadBalancer{},
+					},
+				},
+				"mirrored@file": {
+					Service: &dynamic.Service{
+						Mirroring: &dynamic.Mirroring{
+							Service:     "main@file",
+							MaxBodySize: test.maxBodySize,
+						},
+					},
+				},
+			}
+
+			manager := NewManager(services, nil, nil, &RoundTripperManager{
+				roundTrippers: map[string]http.RoundTripper{
+					"default@internal": http.DefaultTransport,
+				},
+			})
+
+			_, err := manager.BuildHTTP(t.Context(), "mirrored@file")
+			require.NoError(t, err)
+
+			var warned bool
+			for _, entry := range hook.AllEntries() {
+				if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "maxBodySize is not configured or negative") {
+					warned = true
+				}
+			}
+			assert.Equal(t, test.wantWarning, warned)
+		})
+	}
 }
 
 func TestBuildHealthCheckOptions(t *testing.T) {

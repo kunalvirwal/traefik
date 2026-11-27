@@ -1092,6 +1092,12 @@ The mirroring is able to mirror requests sent to a service to other services.
 Please note that by default the whole request is buffered in memory while it is being mirrored.
 See the maxBodySize option in the example below for how to modify this behaviour.
 
+!!! warning "Unlimited request body size by default"
+
+    With the default `maxBodySize` of `-1`, the whole body of each mirrored request is buffered in memory with no size limit.
+    Set `maxBodySize` to limit the size of the buffered body.
+    Traefik logs a warning when a mirroring service buffers the request body without a limit.
+
 !!! info "Supported Providers"
 
     This strategy can be defined currently with the [File](../../providers/file.md) or [IngressRoute](../../providers/kubernetes-crd.md) providers.

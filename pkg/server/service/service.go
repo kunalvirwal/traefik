@@ -243,6 +243,11 @@ func (m *Manager) getMirrorServiceHandler(ctx context.Context, config *dynamic.M
 	if config.MaxBodySize != nil {
 		maxBodySize = *config.MaxBodySize
 	}
+
+	if maxBodySize < 0 {
+		log.FromContext(ctx).Warn("maxBodySize is not configured or negative, allowing unlimited request body size which can lead to DoS attacks and memory exhaustion. Please set an appropriate limit.")
+	}
+
 	handler := mirror.New(serviceHandler, m.routinePool, maxBodySize, config.HealthCheck)
 	for _, mirrorConfig := range config.Mirrors {
 		mirrorHandler, err := m.BuildHTTP(ctx, mirrorConfig.Name)

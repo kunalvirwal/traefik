@@ -814,6 +814,12 @@ http:
 
 The `mirroring` service type mirrors requests sent to a service to other services. Please note that by default the whole request is buffered in memory while it is being mirrored. See the `maxBodySize` option in the example below for how to modify this behaviour. You can also omit the request body by setting the `mirrorBody` option to false.
 
+!!! warning "Unlimited request body size by default"
+
+    With the default `maxBodySize` of `-1`, the whole body of each mirrored request is buffered in memory with no size limit.
+    Set `maxBodySize` to limit the size of the buffered body, or set `mirrorBody` to false to mirror requests without their body.
+    Traefik logs a warning when a mirroring service buffers the request body without a limit.
+
 !!! warning "Default behavior of `percent`"
 
     When configuring a `mirror` service, if the `percent` field is not set, it defaults to `0`, meaning **no traffic will be sent to the mirror**.
@@ -1036,6 +1042,12 @@ When the main service responds with an HTTP status code matching one of the conf
 
 To support request replay, the request body is buffered up to `maxRequestBodyBytes`.
 Requests with bodies larger than this limit receive a `413 Request Entity Too Large` response.
+
+!!! warning "Unlimited request body size by default"
+
+    With the default `maxRequestBodyBytes` of `-1`, the whole request body is buffered in memory with no size limit.
+    Set `maxRequestBodyBytes` to limit the size of the buffered body.
+    Traefik logs a warning when a failover service buffers the request body without a limit.
 
 Below is a list of options available for the `errors` option and an example of how to configure it for a failover service:
 

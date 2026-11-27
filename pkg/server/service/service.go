@@ -169,7 +169,7 @@ func (m *Manager) BuildHTTP(rootCtx context.Context, serviceName string) (http.H
 		}
 	case conf.Mirroring != nil:
 		var err error
-		lb, err = m.getMirrorServiceHandler(ctx, conf.Mirroring)
+		lb, err = m.getMirrorServiceHandler(ctx, serviceName, conf.Mirroring)
 		if err != nil {
 			conf.AddError(err, true)
 			return nil, err
@@ -238,6 +238,18 @@ func (m *Manager) getFailoverServiceHandler(ctx context.Context, serviceName str
 		return nil, fmt.Errorf("child service %v of %v not a healthcheck.StatusUpdater (%T)", config.Service, serviceName, serviceHandler)
 	}
 
+	if isErrorDefined {
+		maxRequestBodyBytes := dynamic.FailoverErrorsDefaultMaxRequestBodyBytes
+		if config.Errors.MaxRequestBodyBytes != nil {
+			maxRequestBodyBytes = *config.Errors.MaxRequestBodyBytes
+		}
+
+		if maxRequestBodyBytes < 0 {
+			log.Ctx(ctx).Warn().Str(logs.ServiceName, serviceName).
+				Msg("errors.maxRequestBodyBytes is not configured or negative, allowing unlimited request body size which can lead to DoS attacks and memory exhaustion. Please set an appropriate limit.")
+		}
+	}
+
 	f, err := failover.New(config)
 	if err != nil {
 		return nil, fmt.Errorf("error creating failover service %v: %w", serviceName, err)
@@ -278,7 +290,7 @@ func (m *Manager) getFailoverServiceHandler(ctx context.Context, serviceName str
 	return f, nil
 }
 
-func (m *Manager) getMirrorServiceHandler(ctx context.Context, config *dynamic.Mirroring) (http.Handler, error) {
+func (m *Manager) getMirrorServiceHandler(ctx context.Context, serviceName string, config *dynamic.Mirroring) (http.Handler, error) {
 	serviceHandler, err := m.BuildHTTP(ctx, config.Service)
 	if err != nil {
 		return nil, err
@@ -293,6 +305,12 @@ func (m *Manager) getMirrorServiceHandler(ctx context.Context, config *dynamic.M
 	if config.MaxBodySize != nil {
 		maxBodySize = *config.MaxBodySize
 	}
+
+	if mirrorBody && maxBodySize < 0 {
+		log.Ctx(ctx).Warn().Str(logs.ServiceName, serviceName).
+			Msg("maxBodySize is not configured or negative with 'mirrorBody: true', allowing unlimited request body size which can lead to DoS attacks and memory exhaustion. Please set an appropriate limit.")
+	}
+
 	handler := mirror.New(serviceHandler, m.routinePool, mirrorBody, maxBodySize, config.HealthCheck)
 	for _, mirrorConfig := range config.Mirrors {
 		mirrorHandler, err := m.BuildHTTP(ctx, mirrorConfig.Name)

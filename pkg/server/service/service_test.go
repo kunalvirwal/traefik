@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/containous/alice"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ptypes "github.com/traefik/paerser/types"
@@ -606,6 +608,129 @@ func TestMultipleTypeOnBuildHTTP(t *testing.T) {
 
 	_, err := manager.BuildHTTP(t.Context(), "test@file")
 	assert.Error(t, err, "cannot create service: multi-types service not supported, consider declaring two different pieces of service instead")
+}
+
+func TestGetMirrorServiceHandler_maxBodySizeWarning(t *testing.T) {
+	testCases := []struct {
+		desc        string
+		mirrorBody  *bool
+		maxBodySize *int64
+		wantWarning bool
+	}{
+		{
+			desc:        "default body size",
+			wantWarning: true,
+		},
+		{
+			desc:        "unlimited body size",
+			maxBodySize: new(int64(-1)),
+			wantWarning: true,
+		},
+		{
+			desc:        "limited body size",
+			maxBodySize: new(int64(1024)),
+		},
+		{
+			desc:       "body not mirrored",
+			mirrorBody: new(false),
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			services := map[string]*runtime.ServiceInfo{
+				"main@file": {
+					Service: &dynamic.Service{
+						LoadBalancer: &dynamic.ServersLoadBalancer{Strategy: dynamic.BalancerStrategyWRR},
+					},
+				},
+				"mirrored@file": {
+					Service: &dynamic.Service{
+						Mirroring: &dynamic.Mirroring{
+							Service:     "main@file",
+							MirrorBody:  test.mirrorBody,
+							MaxBodySize: test.maxBodySize,
+						},
+					},
+				},
+			}
+
+			manager := NewManager(services, nil, nil, &transportManagerMock{}, nil)
+
+			var buf bytes.Buffer
+			ctx := zerolog.New(&buf).Level(zerolog.WarnLevel).WithContext(t.Context())
+
+			_, err := manager.BuildHTTP(ctx, "mirrored@file")
+			require.NoError(t, err)
+
+			assert.Equal(t, test.wantWarning, strings.Contains(buf.String(), "maxBodySize is not configured or negative"))
+		})
+	}
+}
+
+func TestGetFailoverServiceHandler_maxRequestBodyBytesWarning(t *testing.T) {
+	testCases := []struct {
+		desc                string
+		maxRequestBodyBytes *int64
+		wantWarning         bool
+	}{
+		{
+			desc:        "default body size",
+			wantWarning: true,
+		},
+		{
+			desc:                "unlimited body size",
+			maxRequestBodyBytes: new(int64(-1)),
+			wantWarning:         true,
+		},
+		{
+			desc:                "limited body size",
+			maxRequestBodyBytes: new(int64(1024)),
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			services := map[string]*runtime.ServiceInfo{
+				"main@file": {
+					Service: &dynamic.Service{
+						LoadBalancer: &dynamic.ServersLoadBalancer{Strategy: dynamic.BalancerStrategyWRR},
+					},
+				},
+				"fallback@file": {
+					Service: &dynamic.Service{
+						LoadBalancer: &dynamic.ServersLoadBalancer{Strategy: dynamic.BalancerStrategyWRR},
+					},
+				},
+				"failover@file": {
+					Service: &dynamic.Service{
+						Failover: &dynamic.Failover{
+							Service:  "main@file",
+							Fallback: "fallback@file",
+							Errors: &dynamic.FailoverError{
+								Status:              []string{"500-504"},
+								MaxRequestBodyBytes: test.maxRequestBodyBytes,
+							},
+						},
+					},
+				},
+			}
+
+			manager := NewManager(services, nil, nil, &transportManagerMock{}, nil)
+
+			var buf bytes.Buffer
+			ctx := zerolog.New(&buf).Level(zerolog.WarnLevel).WithContext(t.Context())
+
+			_, err := manager.BuildHTTP(ctx, "failover@file")
+			require.NoError(t, err)
+
+			assert.Equal(t, test.wantWarning, strings.Contains(buf.String(), "errors.maxRequestBodyBytes is not configured or negative"))
+		})
+	}
 }
 
 func TestGetServiceHandler_Headers(t *testing.T) {

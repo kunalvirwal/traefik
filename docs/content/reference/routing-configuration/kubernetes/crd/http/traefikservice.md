@@ -383,6 +383,12 @@ The mirroring `TraefikService` allows you to reference Kubernetes Services and o
 Please note that by default the whole request is buffered in memory while it is being mirrored.
 See the `maxBodySize` option in the example below for how to modify this behavior.
 
+!!! warning "Unlimited request body size by default"
+
+    With the default `maxBodySize` of `-1`, the whole body of each mirrored request is buffered in memory with no size limit.
+    Set `maxBodySize` to limit the size of the buffered body, or set `mirrorBody` to false to mirror requests without their body.
+    Traefik logs a warning when a mirroring service buffers the request body without a limit.
+
 ### Configuration Example
 
 ```yaml tab="IngressRoute"
@@ -517,6 +523,13 @@ The failover service forwards all requests to a fallback service when the main s
 
     HealthCheck on a Failover service can be defined currently only with the [File provider](../../../../install-configuration/providers/others/file.md).
 
+!!! warning "Unlimited request body size by default"
+
+    To replay the request to the fallback service, the request body is buffered in memory.
+    With the default `errors.maxRequestBodyBytes` of `-1`, there is no size limit.
+    Set `errors.maxRequestBodyBytes` to limit the size of the buffered body.
+    Traefik logs a warning when a failover service buffers the request body without a limit.
+
 ### Configuration Examples
 
 ```yaml tab="IngressRoute"
@@ -647,4 +660,4 @@ The exhaustive list of the service options is described in the [`Service`](./ser
 | <a id="opt-service" href="#opt-service" title="#opt-service">`service`</a> | Main service to forward requests to. Provides the same options as a [`Service`](./service.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |                                                                      | Yes      |
 | <a id="opt-fallback" href="#opt-fallback" title="#opt-fallback">`fallback`</a> | Fallback service to use when the main service returns matching error status codes. Provides the same options as a [`Service`](./service.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |                                                                      | Yes      |
 | <a id="opt-errors-status" href="#opt-errors-status" title="#opt-errors-status">`errors.status`</a> | List of HTTP status code ranges for which the fallback service should be used.<br />Each entry can be a single code (e.g. `"429"`) or a range (e.g. `"500-503"`).                                                                                                                                                                                                                                                                                                                                                                                                                                                   |                                                                      | No       |
-| <a id="opt-errors-maxRequestBodyBytes" href="#opt-errors-maxRequestBodyBytes" title="#opt-errors-maxRequestBodyBytes">`errors.`<br />`maxRequestBodyBytes`</a> | Maximum size allowed for the body of the request.<br />If the body is larger, the request is not replayed to the fallback service.<br />-1 means unlimited size.                                                                                                                                                                                                                                                                                                                                                                                                                                                    | -1                                                                   | No       |
+| <a id="opt-errors-maxRequestBodyBytes" href="#opt-errors-maxRequestBodyBytes" title="#opt-errors-maxRequestBodyBytes">`errors.`<br />`maxRequestBodyBytes`</a> | Maximum size allowed for the body of the request.<br />If the body is larger, the request receives a `413 Request Entity Too Large` response.<br />-1 means unlimited size.                                                                                                                                                                                                                                                                                                                                                                                                                                                    | -1                                                                   | No       |

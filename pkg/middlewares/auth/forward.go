@@ -94,8 +94,11 @@ func NewForward(ctx context.Context, next http.Handler, config dynamic.ForwardAu
 
 	if config.MaxBodySize != nil {
 		fa.maxBodySize = *config.MaxBodySize
-	} else if fa.forwardBody {
-		logger.Warn().Msgf("maxBodySize is not configured with 'forwardBody: true', allowing unlimited request body size which can lead to DoS attacks and memory exhaustion. Please set an appropriate limit.")
+	}
+
+	// The default value is set as -1 by providers decoding the configuration with SetDefaults which means unlimited body size.
+	if fa.forwardBody && fa.maxBodySize < 0 {
+		logger.Warn().Msg("maxBodySize is not configured or negative with 'forwardBody: true', allowing unlimited request body size which can lead to DoS attacks and memory exhaustion. Please set an appropriate limit.")
 	}
 
 	if config.MaxResponseBodySize != nil {

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/traefik/traefik/v3/pkg/config/dynamic"
@@ -304,6 +305,50 @@ func TestForwardAuthForwardBodySizeLimit(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
 	assert.Equal(t, 0, serverCallCount)
 	assert.Equal(t, 0, nextCallCount)
+}
+
+func TestForwardAuthMaxBodySizeWarning(t *testing.T) {
+	testCases := []struct {
+		desc        string
+		forwardBody bool
+		maxBodySize *int64
+		wantWarning bool
+	}{
+		{
+			desc: "body not forwarded",
+		},
+		{
+			desc:        "body forwarded without maxBodySize",
+			forwardBody: true,
+			wantWarning: true,
+		},
+		{
+			desc:        "body forwarded with the unlimited default set by SetDefaults",
+			forwardBody: true,
+			maxBodySize: new(dynamic.ForwardAuthDefaultMaxBodySize),
+			wantWarning: true,
+		},
+		{
+			desc:        "body forwarded with maxBodySize",
+			forwardBody: true,
+			maxBodySize: new(int64(1024)),
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			ctx := zerolog.New(&buf).Level(zerolog.WarnLevel).WithContext(t.Context())
+
+			auth := dynamic.ForwardAuth{Address: "http://auth", ForwardBody: test.forwardBody, MaxBodySize: test.maxBodySize}
+			_, err := NewForward(ctx, http.NotFoundHandler(), auth, "authTest")
+			require.NoError(t, err)
+
+			assert.Equal(t, test.wantWarning, strings.Contains(buf.String(), "maxBodySize is not configured or negative"))
+		})
+	}
 }
 
 func TestForwardAuthNotForwardBody(t *testing.T) {
